@@ -7,7 +7,6 @@ use libefi_sys::{
 };
 use std::ffi::CStr;
 use std::fs::File;
-use std::marker::PhantomData;
 use std::ptr::{addr_of, addr_of_mut};
 use std::os::unix::io::AsFd;
 use std::os::unix::io::AsRawFd;
@@ -60,7 +59,7 @@ pub enum GptEntryType {
     IllumosUFS,
     IllumosZFS,
     Reserved,
-    Unknown(Uuid),
+    Other(Uuid),
 }
 
 impl From<Uuid> for GptEntryType {
@@ -71,7 +70,7 @@ impl From<Uuid> for GptEntryType {
             GPT_ENT_TYPE_ILLUMOS_UFS => GptEntryType::IllumosUFS,
             GPT_ENT_TYPE_ILLUMOS_ZFS => GptEntryType::IllumosZFS,
             GPT_ENT_TYPE_RESERVED => GptEntryType::Reserved,
-            _ => GptEntryType::Unknown(uuid),
+            _ => GptEntryType::Other(uuid),
         }
     }
 }
@@ -105,39 +104,35 @@ impl Gpt {
         }
     }
 
-    fn inner(&self) -> &dk_gpt_t {
-        unsafe { &*self.gpt }
-    }
-
-    fn inner_mut(&mut self) -> &mut dk_gpt_t {
-        unsafe { &mut *self.gpt }
-    }
-
     fn raw_partitions(&self) -> &[dk_part_t] {
-        let gpt = self.inner();
-        let count = gpt.efi_nparts as usize;
-        let partitions_ptr = addr_of!(gpt.efi_parts).cast();
         unsafe {
+            let count = (*self.gpt).efi_nparts as usize;
+            let partitions_ptr = addr_of!((*self.gpt).efi_parts).cast();
             std::slice::from_raw_parts(partitions_ptr, count)
         }
     }
 
     fn raw_partitions_mut(&mut self) -> &mut [dk_part_t] {
-        let gpt = self.inner_mut();
-        let count = gpt.efi_nparts as usize;
-        let partitions_ptr = addr_of_mut!(gpt.efi_parts).cast();
         unsafe {
+            let count = (*self.gpt).efi_nparts as usize;
+
+            // NOTE: It's important to ensure that we don't have multiple mut
+            // references to the underlying gpt object.
+            let partitions_ptr = addr_of_mut!((*self.gpt).efi_parts).cast();
+
             std::slice::from_raw_parts_mut(partitions_ptr, count)
         }
     }
 
     pub fn block_size(&self) -> u32 {
-        self.inner().efi_lbasize
+        unsafe {
+            (*self.gpt).efi_lbasize
+        }
     }
 
     pub fn guid(&self) -> Uuid {
-        let guid_ptr: *const u8 = addr_of!(self.inner().efi_disk_uguid) as *const u8;
         let uuid = unsafe {
+            let guid_ptr = addr_of!((*self.gpt).efi_disk_uguid) as *const u8;
             std::slice::from_raw_parts(guid_ptr, 16)
         };
         Uuid::from_slice_le(uuid).unwrap()
@@ -151,7 +146,6 @@ impl Gpt {
                 Partition {
                     index,
                     part,
-                    phantom: PhantomData,
                 }
             })
     }
@@ -159,10 +153,11 @@ impl Gpt {
     pub fn partitions_mut(&mut self) -> impl Iterator<Item = PartitionMut<'_>> {
         self.raw_partitions_mut()
             .iter_mut()
-            .map(|part| {
+            .enumerate()
+            .map(|(index, part)| {
                 PartitionMut {
+                    index,
                     part,
-                    phantom: PhantomData,
                 }
             })
     }
@@ -178,29 +173,24 @@ impl Drop for Gpt {
 
 pub struct Partition<'a> {
     index: usize,
-    part: *const dk_part_t,
-    phantom: PhantomData<&'a dk_part_t>,
+    part: &'a dk_part_t,
 }
 
 impl<'a> Partition<'a> {
-    fn inner(&self) -> &dk_part_t {
-        unsafe { &*self.part }
-    }
-
     pub fn index(&self) -> usize {
         self.index
     }
 
     pub fn start(&self) -> u64 {
-        self.inner().p_start
+        self.part.p_start
     }
 
     pub fn size(&self) -> u64 {
-        self.inner().p_size
+        self.part.p_size
     }
 
     pub fn partition_type_guid(&self) -> GptEntryType {
-        let guid_ptr: *const u8 = addr_of!(self.inner().p_guid) as *const u8;
+        let guid_ptr: *const u8 = addr_of!(self.part.p_guid) as *const u8;
         let uuid = unsafe {
             std::slice::from_raw_parts(guid_ptr, 16)
         };
@@ -208,25 +198,25 @@ impl<'a> Partition<'a> {
     }
 
     pub fn tag(&self) -> u16 {
-        self.inner().p_tag
+        self.part.p_tag
     }
 
     pub fn flag(&self) -> u16 {
-        self.inner().p_flag
+        self.part.p_flag
     }
 
     pub fn name(&self) -> &CStr {
-        if !self.inner().p_name.as_slice().contains(&0) {
+        if !self.part.p_name.as_slice().contains(&0) {
             return <&CStr>::default();
         }
-        let name_ptr = addr_of!(self.inner().p_name) as *const i8;
+        let name_ptr = addr_of!(self.part.p_name) as *const i8;
         unsafe {
             CStr::from_ptr(name_ptr)
         }
     }
 
     pub fn user_guid(&self) -> Uuid {
-        let guid_ptr: *const u8 = addr_of!(self.inner().p_uguid) as *const u8;
+        let guid_ptr: *const u8 = addr_of!(self.part.p_uguid) as *const u8;
         let uuid = unsafe {
             std::slice::from_raw_parts(guid_ptr, 16)
         };
@@ -235,6 +225,76 @@ impl<'a> Partition<'a> {
 }
 
 pub struct PartitionMut<'a> {
-    part: *mut dk_part_t,
-    phantom: PhantomData<&'a mut dk_part_t>,
+    index: usize,
+    part: &'a mut dk_part_t,
+}
+
+impl<'a> PartitionMut<'a> {
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn start(&self) -> u64 {
+        self.part.p_start
+    }
+
+    pub fn set_start(&mut self, start: u64) {
+        self.part.p_start = start;
+    }
+
+    pub fn size(&self) -> u64 {
+        self.part.p_size
+    }
+
+    pub fn set_size(&mut self, size: u64) {
+        self.part.p_size = size;
+    }
+
+    pub fn partition_type_guid(&self) -> GptEntryType {
+        let guid_ptr: *const u8 = addr_of!(self.part.p_guid) as *const u8;
+        let uuid = unsafe {
+            std::slice::from_raw_parts(guid_ptr, 16)
+        };
+        Uuid::from_slice_le(uuid).unwrap().into()
+    }
+
+    // TODO: Set part type
+
+    pub fn tag(&self) -> u16 {
+        self.part.p_tag
+    }
+
+    pub fn set_tag(&mut self, tag: u16) {
+        self.part.p_tag = tag;
+    }
+
+    pub fn flag(&self) -> u16 {
+        self.part.p_flag
+    }
+
+    pub fn set_flag(&mut self, flag: u16) {
+        self.part.p_flag = flag;
+    }
+
+    pub fn name(&self) -> &CStr {
+        if !self.part.p_name.as_slice().contains(&0) {
+            return <&CStr>::default();
+        }
+        let name_ptr = addr_of!(self.part.p_name) as *const i8;
+        unsafe {
+            CStr::from_ptr(name_ptr)
+        }
+    }
+
+    // TODO: Set name
+
+    pub fn user_guid(&self) -> Uuid {
+        let guid_ptr: *const u8 = addr_of!(self.part.p_uguid) as *const u8;
+        let uuid = unsafe {
+            std::slice::from_raw_parts(guid_ptr, 16)
+        };
+        Uuid::from_slice_le(uuid).unwrap()
+    }
+
+    // TODO: Set user GUID
 }
