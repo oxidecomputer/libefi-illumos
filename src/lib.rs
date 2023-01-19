@@ -1,6 +1,6 @@
 use libefi_sys::{
     dk_gpt_t, dk_part_t, efi_alloc_and_init, efi_alloc_and_read, efi_free, efi_reserved_sectors,
-    efi_use_whole_disk, efi_write, V_BOOT, V_ROOT, V_SWAP, V_UNASSIGNED, V_USR,
+    efi_write, V_BOOT, V_ROOT, V_SWAP, V_UNASSIGNED, V_USR,
 };
 use std::ffi::CStr;
 use std::fs::File;
