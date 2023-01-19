@@ -1,5 +1,4 @@
 use libefi_illumos::*;
-use std::fs::File;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -15,8 +14,7 @@ fn main() {
 }
 
 fn scan(disk_name: &str) {
-    let disk = File::open(disk_name).expect("Disk not found: {disk_name}");
-    let gpt = match Gpt::new(disk) {
+    let gpt = match Gpt::read(disk_name) {
         Ok(gpt) => gpt,
         Err(e) => {
             eprintln!("Cannot access GPT in: {disk_name}: {e}");
@@ -27,10 +25,11 @@ fn scan(disk_name: &str) {
     println!("Block Size: {}", gpt.block_size());
     println!("Disk UUID: {}", gpt.guid());
 
-    for partition in gpt.partitions().filter(|part| part.size() != 0) {
+    for partition in gpt.partitions() {
         println!("Partition {}", partition.index());
         println!("  start: {}", partition.start());
         println!("  size: {}", partition.size());
+        println!("  tag: {:x}", partition.tag());
         println!("  GUID: {:?}", partition.partition_type_guid());
         println!("  name: {}", partition.name().to_string_lossy());
         println!("  UGUID: {}", partition.user_guid());

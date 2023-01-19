@@ -8,6 +8,7 @@ license = "MPL-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.66"
+libc = "0.2"
 libefi-sys = "0.1.0"
-uuid = "1.2.2"
+thiserror = "1.0.36"
+uuid = { version = "1.2.2", features = [ "v4" ] }
