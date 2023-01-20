@@ -5,10 +5,10 @@ use libefi_sys::{
 use std::ffi::CStr;
 use std::fs::File;
 use std::fs::OpenOptions;
-use std::os::fd::RawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsFd;
 use std::os::unix::io::AsRawFd;
+use std::os::unix::io::RawFd;
 use std::path::Path;
 use std::ptr::{addr_of, addr_of_mut};
 use uuid::Uuid;
